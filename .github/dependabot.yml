@@ -1,0 +1,33 @@
+version: 2
+
+updates:
+  - package-ecosystem: composer
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      # One PR for routine dev-tool bumps instead of ten.
+      dev-tools:
+        dependency-type: development
+        update-types: [minor, patch]
+      framework:
+        patterns: ["laravel/*", "symfony/*"]
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: monthly

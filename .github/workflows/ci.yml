@@ -1,0 +1,233 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A new push to a PR cancels the run it replaces; runs on main always finish.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  PHP_VERSION: "8.4"
+
+jobs:
+  # -------------------------------------------------------------------------
+  # Fast feedback: these fail in under a minute and need no database.
+  # -------------------------------------------------------------------------
+  lint:
+    name: Code style
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ env.PHP_VERSION }}
+          coverage: none
+      - uses: ramsey/composer-install@v3
+      - run: vendor/bin/pint --test
+
+  static-analysis:
+    name: Static analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ env.PHP_VERSION }}
+          coverage: none
+      - uses: ramsey/composer-install@v3
+      - name: Restore PHPStan result cache
+        uses: actions/cache@v4
+        with:
+          path: .phpstan.cache
+          key: phpstan-${{ github.run_id }}
+          restore-keys: phpstan-
+      - name: PHPStan (level max)
+        run: vendor/bin/phpstan analyse --memory-limit=1G --no-progress --error-format=github
+      - name: Type coverage (100%)
+        run: php -d memory_limit=1G vendor/bin/pest --type-coverage --min=100
+
+  dependencies:
+    name: Dependency health
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ env.PHP_VERSION }}
+          coverage: none
+      - run: composer validate --strict
+      - uses: ramsey/composer-install@v3
+      - name: Known vulnerabilities
+        run: composer audit --locked
+
+  # -------------------------------------------------------------------------
+  # The suite on every supported PHP version, then on the real databases.
+  # -------------------------------------------------------------------------
+  tests:
+    name: Tests (PHP ${{ matrix.php }}, ${{ matrix.db }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ["8.4", "8.5"]
+        db: [sqlite]
+        include:
+          - { php: "8.4", db: mysql }
+          - { php: "8.4", db: pgsql }
+
+    services:
+      mysql:
+        image: ${{ matrix.db == 'mysql' && 'mysql:8.4' || '' }}
+        env:
+          MYSQL_DATABASE: testing
+          MYSQL_ROOT_PASSWORD: secret
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -psecret"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+      postgres:
+        image: ${{ matrix.db == 'pgsql' && 'postgres:17' || '' }}
+        env:
+          POSTGRES_DB: testing
+          POSTGRES_PASSWORD: secret
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd=pg_isready
+          --health-interval=5s --health-timeout=5s --health-retries=20
+
+    env:
+      DB_CONNECTION: ${{ matrix.db }}
+      DB_HOST: 127.0.0.1
+      DB_PORT: ${{ matrix.db == 'pgsql' && '5432' || '3306' }}
+      DB_DATABASE: ${{ matrix.db == 'sqlite' && ':memory:' || 'testing' }}
+      DB_USERNAME: ${{ matrix.db == 'pgsql' && 'postgres' || 'root' }}
+      DB_PASSWORD: secret
+
+    steps:
+      - uses: actions/checkout@v5
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: pdo_sqlite, pdo_mysql, pdo_pgsql
+          coverage: none
+      - uses: ramsey/composer-install@v3
+      - name: Pest
+        run: vendor/bin/pest --parallel --log-junit=junit.xml
+      - name: Upload JUnit report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-php${{ matrix.php }}-${{ matrix.db }}
+          path: junit.xml
+          retention-days: 14
+
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ env.PHP_VERSION }}
+          coverage: pcov
+      - uses: ramsey/composer-install@v3
+      - name: Pest with coverage (minimum 95%)
+        run: vendor/bin/pest --parallel --coverage --min=95 --coverage-clover=coverage.xml --coverage-html=coverage
+      - name: Summarise coverage
+        if: ${{ !cancelled() }}
+        run: |
+          php -r '
+            $x = simplexml_load_file("coverage.xml")->project->metrics;
+            $pct = fn ($a, $b) => $b > 0 ? round(100 * $a / $b, 2) : 100;
+            printf("### Coverage\n\n| Lines | Methods | Classes |\n|---|---|---|\n| %s%% (%d/%d) | %s%% (%d/%d) | %s%% (%d/%d) |\n",
+              $pct((int) $x["coveredstatements"], (int) $x["statements"]), $x["coveredstatements"], $x["statements"],
+              $pct((int) $x["coveredmethods"], (int) $x["methods"]), $x["coveredmethods"], $x["methods"],
+              $pct((int) $x["coveredelements"], (int) $x["elements"]), $x["coveredelements"], $x["elements"]);
+          ' >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload coverage report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: |
+            coverage.xml
+            coverage/
+          retention-days: 14
+
+  mutation:
+    name: Mutation testing
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ env.PHP_VERSION }}
+          coverage: pcov
+      - uses: ramsey/composer-install@v3
+      - name: Pest --mutate
+        run: vendor/bin/pest --mutate --parallel --min=90
+
+  # -------------------------------------------------------------------------
+  # The artefact that would actually ship.
+  # -------------------------------------------------------------------------
+  docker:
+    name: Docker image
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build production image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: production
+          load: true
+          tags: tally:ci
+          cache-from: type=gha,scope=production
+          cache-to: type=gha,mode=max,scope=production
+
+      - name: Smoke test
+        run: bash docker/smoke-test.sh tally:ci
+
+      - name: Scan for fixable critical vulnerabilities
+        uses: aquasecurity/trivy-action@0.33.1
+        with:
+          image-ref: tally:ci
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: Build dev image (used by compose)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: dev
+          cache-from: type=gha,scope=dev
+          cache-to: type=gha,mode=max,scope=dev
+
+  # One required check for branch protection, instead of listing every job.
+  ci-passed:
+    name: CI passed
+    if: ${{ always() }}
+    needs: [lint, static-analysis, dependencies, tests, coverage, mutation, docker]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if any required job did not succeed
+        if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
+        run: exit 1

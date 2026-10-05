@@ -1,0 +1,79 @@
+# Local development stack.
+#
+#   docker compose up -d                    API on http://localhost:8080, mail UI on :8025
+#   docker compose run --rm test            full Pest suite against MySQL
+#   docker compose exec app php artisan ... anything else
+
+x-app: &app
+  build:
+    context: .
+    target: dev
+  volumes:
+    - .:/app
+    - /app/vendor # Keep the image's vendor dir; don't let the host's shadow it.
+  environment: &app-env
+    APP_ENV: local
+    APP_KEY: base64:2fl+Ktvkfl+Fuz4Qp/A75G2RTiWVA/ZoKZvp6fiiM10=
+    APP_DEBUG: "true"
+    DB_CONNECTION: mysql
+    DB_HOST: mysql
+    DB_DATABASE: tally
+    DB_USERNAME: tally
+    DB_PASSWORD: secret
+    QUEUE_CONNECTION: database
+    MAIL_MAILER: smtp
+    MAIL_HOST: mailpit
+    MAIL_PORT: 1025
+  depends_on:
+    mysql:
+      condition: service_healthy
+
+services:
+  app:
+    <<: *app
+    ports:
+      - "8080:8080"
+
+  queue:
+    <<: *app
+    command: ["php", "artisan", "queue:work", "--tries=1"]
+
+  scheduler:
+    <<: *app
+    command: ["php", "artisan", "schedule:work"]
+
+  test:
+    <<: *app
+    profiles: ["test"]
+    environment:
+      <<: *app-env
+      APP_ENV: testing
+      DB_DATABASE: tally_testing
+      QUEUE_CONNECTION: sync
+      MAIL_MAILER: array
+    command: ["vendor/bin/pest", "--parallel"]
+
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: tally
+      MYSQL_USER: tally
+      MYSQL_PASSWORD: secret
+      MYSQL_ROOT_PASSWORD: secret
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./docker/mysql/create-testing-database.sql:/docker-entrypoint-initdb.d/10-create-testing-database.sql:ro
+    ports:
+      - "3306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-psecret"]
+      interval: 5s
+      retries: 20
+
+  mailpit:
+    image: axllent/mailpit:latest
+    ports:
+      - "8025:8025"
+
+volumes:
+  mysql-data:

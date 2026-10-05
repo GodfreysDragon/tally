@@ -1,0 +1,124 @@
+{
+    "$schema": "https://getcomposer.org/schema.json",
+    "name": "calmarusin/tally",
+    "type": "project",
+    "description": "An invoicing API that exists to show a production-grade testing and CI pipeline: Pest, mutation testing, PHPStan max, GitHub Actions, Docker.",
+    "keywords": [
+        "laravel",
+        "pest",
+        "ci",
+        "github-actions",
+        "docker",
+        "mutation-testing"
+    ],
+    "license": "MIT",
+    "require": {
+        "php": "^8.4",
+        "laravel/framework": "^13.17",
+        "laravel/sanctum": "^4.0",
+        "laravel/tinker": "^3.0"
+    },
+    "require-dev": {
+        "fakerphp/faker": "^1.23",
+        "larastan/larastan": "^3.12",
+        "laravel/pail": "^1.2.5",
+        "laravel/pao": "^1.0.6",
+        "laravel/pint": "^1.27",
+        "mockery/mockery": "^1.6",
+        "nunomaduro/collision": "^8.6",
+        "pestphp/pest": "^5.3",
+        "pestphp/pest-plugin-laravel": "^5.0",
+        "pestphp/pest-plugin-type-coverage": "^5.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "App\\": "app/",
+            "Database\\Factories\\": "database/factories/",
+            "Database\\Seeders\\": "database/seeders/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "setup": [
+            "composer install",
+            "@php -r \"file_exists('.env') || copy('.env.example', '.env');\"",
+            "@php artisan key:generate",
+            "@php -r \"file_exists('database/database.sqlite') || touch('database/database.sqlite');\"",
+            "@php artisan migrate --force"
+        ],
+        "dev": [
+            "Composer\\Config::disableProcessTimeout",
+            "@php artisan serve"
+        ],
+        "lint": "pint --parallel",
+        "test": [
+            "@test:lint",
+            "@test:types",
+            "@test:type-coverage",
+            "@test:unit"
+        ],
+        "test:lint": "pint --test",
+        "test:types": "phpstan analyse --memory-limit=1G",
+        "test:type-coverage": "@php -d memory_limit=1G vendor/bin/pest --type-coverage --min=100",
+        "test:unit": [
+            "@php artisan config:clear --ansi",
+            "pest --parallel"
+        ],
+        "test:coverage": [
+            "@php artisan config:clear --ansi",
+            "pest --parallel --coverage --min=95"
+        ],
+        "test:mutate": [
+            "@php artisan config:clear --ansi",
+            "pest --mutate --parallel --min=90"
+        ],
+        "post-autoload-dump": [
+            "Illuminate\\Foundation\\ComposerScripts::postAutoloadDump",
+            "@php artisan package:discover --ansi"
+        ],
+        "post-update-cmd": [
+            "@php artisan vendor:publish --tag=laravel-assets --ansi --force"
+        ],
+        "post-root-package-install": [
+            "@php -r \"file_exists('.env') || copy('.env.example', '.env');\""
+        ],
+        "post-create-project-cmd": [
+            "@php artisan key:generate --ansi",
+            "@php -r \"file_exists('database/database.sqlite') || touch('database/database.sqlite');\"",
+            "@php artisan migrate --graceful --ansi"
+        ],
+        "pre-package-uninstall": [
+            "Illuminate\\Foundation\\ComposerScripts::prePackageUninstall"
+        ]
+    },
+    "extra": {
+        "laravel": {
+            "dont-discover": []
+        }
+    },
+    "config": {
+        "optimize-autoloader": true,
+        "preferred-install": "dist",
+        "sort-packages": true,
+        "allow-plugins": {
+            "pestphp/pest-plugin": true,
+            "php-http/discovery": true
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true,
+    "scripts-descriptions": {
+        "lint": "Fix code style with Pint.",
+        "test:lint": "Check code style without changing files.",
+        "test:types": "Run PHPStan (Larastan) at max level.",
+        "test:type-coverage": "Fail unless every parameter, property and return is typed.",
+        "test:unit": "Run the Pest suite (arch, unit, feature) in parallel.",
+        "test:coverage": "Run the suite with line coverage; fails below 95%. Needs PCOV or Xdebug.",
+        "test:mutate": "Run mutation testing. Needs PCOV or Xdebug.",
+        "test": "Everything CI runs that does not need a coverage driver."
+    }
+}
