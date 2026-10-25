@@ -6,6 +6,7 @@ namespace Tests;
 
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Testing\TestResponse;
 use RuntimeException;
 
 abstract class TestCase extends BaseTestCase
@@ -18,6 +19,20 @@ abstract class TestCase extends BaseTestCase
 
         // Any HTTP call a test did not explicitly fake is a bug, not a network request.
         Http::preventStrayRequests();
+    }
+
+    /**
+     * Every API response a test receives must match the OpenAPI spec.
+     *
+     * @param  \Symfony\Component\HttpFoundation\Response  $response
+     * @param  \Illuminate\Http\Request  $request
+     * @return TestResponse<\Symfony\Component\HttpFoundation\Response>
+     */
+    protected function createTestResponse($response, $request): TestResponse
+    {
+        OpenApi::assertResponseMatches($request, $response);
+
+        return parent::createTestResponse($response, $request);
     }
 
     /**

@@ -56,6 +56,8 @@ jobs:
         run: vendor/bin/phpstan analyse --memory-limit=1G --no-progress --error-format=github
       - name: Type coverage (100%)
         run: php -d memory_limit=1G vendor/bin/pest --type-coverage --min=100
+      - name: Lint the OpenAPI spec
+        run: npx --yes @redocly/cli@2.71.0 lint docs/openapi.yaml
 
   dependencies:
     name: Dependency health
