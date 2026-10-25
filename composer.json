@@ -1,6 +1,6 @@
 {
     "$schema": "https://getcomposer.org/schema.json",
-    "name": "calmarusin/tally",
+    "name": "godfreysdragon/tally",
     "type": "project",
     "description": "An invoicing API that exists to show a production-grade testing and CI pipeline: Pest, mutation testing, PHPStan max, GitHub Actions, Docker.",
     "keywords": [
