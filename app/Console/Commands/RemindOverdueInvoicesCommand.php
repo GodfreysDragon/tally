@@ -19,7 +19,8 @@ final class RemindOverdueInvoicesCommand extends Command
     public function handle(): int
     {
         $interval = config()->integer('tally.reminder_interval_days');
-        $dryRun = (bool) $this->option('dry-run');
+        // A VALUE_NONE option is already a bool; the cast is for PHPStan, so removing it changes nothing.
+        $dryRun = (bool) $this->option('dry-run'); // @pest-mutate-ignore
         $count = 0;
 
         Invoice::query()
@@ -41,7 +42,7 @@ final class RemindOverdueInvoicesCommand extends Command
                 $invoice->forceFill(['last_reminded_at' => now()])->save();
             });
 
-        $this->components->info(($dryRun ? 'Would remind' : 'Reminded')." {$count} overdue ".str('invoice')->plural($count).'.');
+        $this->components->info(($dryRun ? 'Would remind' : 'Reminded')." {$count} overdue ".str('invoice')->plural($count));
 
         return self::SUCCESS;
     }

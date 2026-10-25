@@ -40,6 +40,10 @@ describe('send', function () {
         );
 
         Queue::assertPushed(DeliverWebhook::class, fn (DeliverWebhook $job) => $job->payload['type'] === 'invoice.sent');
+
+        $stored = $invoice->fresh();
+        expect($stored?->status)->toBe(InvoiceStatus::Sent)
+            ->and($stored?->number)->toBe(sprintf('INV-%d-0001', now()->year));
     });
 
     it('keeps an explicit due date', function () {
@@ -105,6 +109,7 @@ describe('payments', function () {
 
         Queue::assertPushed(DeliverWebhook::class, 1);
         Queue::assertPushed(DeliverWebhook::class, fn (DeliverWebhook $job) => $job->payload['type'] === 'payment.recorded'
+            && $job->payload['data']['payment_id'] === $invoice->payments()->sole()->id
             && $job->payload['data']['amount'] === 5_000
             && $job->payload['data']['invoice']['balance'] === 7_000);
     });
@@ -152,6 +157,27 @@ describe('payments', function () {
             ->assertJsonValidationErrors('amount');
     })->with([0, -100, 10.5, 'ten', null]);
 
+    it('validates the optional fields', function (array $payload, array $errors) {
+        $invoice = Invoice::factory()->for($this->customer)->sent()->create();
+
+        $this->postJson("/api/invoices/{$invoice->id}/payments", ['amount' => 100, ...$payload])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors($errors);
+    })->with([
+        'missing amount' => [['amount' => null], ['amount' => 'required']],
+        'non-string reference' => [['reference' => ['BACS']], ['reference' => 'string']],
+        'reference too long' => [['reference' => str_repeat('r', 256)], ['reference' => '255']],
+        'unparseable date' => [['received_at' => 'yesterday-ish'], ['received_at' => 'valid date']],
+    ]);
+
+    it('accepts explicit nulls for the optional fields', function () {
+        $invoice = Invoice::factory()->for($this->customer)->sent()->create();
+
+        $this->postJson("/api/invoices/{$invoice->id}/payments", ['amount' => 100, 'reference' => null, 'received_at' => null])
+            ->assertCreated()
+            ->assertJsonPath('reference', null);
+    });
+
     it('refuses a payment dated in the future', function () {
         $invoice = Invoice::factory()->for($this->customer)->sent()->create();
 
@@ -179,8 +205,8 @@ describe('void', function () {
         $this->postJson("/api/invoices/{$invoice->id}/void")->assertConflict();
     })->with(['paid', 'void']);
 
-    it('refuses to void an invoice that has taken money', function () {
-        $invoice = Invoice::factory()->for($this->customer)->sent()->create(['amount_paid' => 100]);
+    it('refuses to void an invoice that has taken any money', function () {
+        $invoice = Invoice::factory()->for($this->customer)->sent()->create(['amount_paid' => 1]);
 
         $this->postJson("/api/invoices/{$invoice->id}/void")
             ->assertConflict()

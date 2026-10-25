@@ -11,7 +11,9 @@ use Illuminate\Validation\Rule;
 
 final class StoreCustomerRequest extends FormRequest
 {
-    public const array CURRENCIES = ['GBP', 'EUR', 'USD'];
+    // A constant isn't an executable line, so mutation testing can't see it covered.
+    // CustomerTest accepts each currency explicitly.
+    public const array CURRENCIES = ['GBP', 'EUR', 'USD']; // @pest-mutate-ignore
 
     /**
      * @return array<string, ValidationRule|array<mixed>|string>

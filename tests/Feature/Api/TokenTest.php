@@ -39,6 +39,17 @@ it('validates the request', function () {
         ->assertJsonValidationErrors(['email', 'password', 'device_name']);
 });
 
+it('validates each field', function (array $payload, array $errors) {
+    $this->postJson('/api/tokens', ['email' => 'owner@example.test', 'password' => 'password', 'device_name' => 'ci', ...$payload])
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors($errors);
+})->with([
+    'malformed email' => [['email' => 'owner'], ['email' => 'valid email']],
+    'non-string password' => [['password' => ['password']], ['password' => 'string']],
+    'non-string device name' => [['device_name' => ['ci']], ['device_name' => 'string']],
+    'device name too long' => [['device_name' => str_repeat('d', 256)], ['device_name' => '255']],
+]);
+
 it('throttles brute-force attempts', function () {
     RateLimiter::clear('tokens');
 

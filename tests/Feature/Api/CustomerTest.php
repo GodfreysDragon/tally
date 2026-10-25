@@ -51,7 +51,15 @@ it('validates new customers', function (array $payload, array|string $errors) {
         ...$payload,
     ])->assertUnprocessable()->assertJsonValidationErrors($errors);
 })->with([
-    'missing name' => [['name' => ''], 'name'],
+    'missing name' => [['name' => ''], ['name' => 'required']],
+    'non-string name' => [['name' => 123], ['name' => 'string']],
+    'name too long' => [['name' => str_repeat('n', 256)], ['name' => '255']],
+    'missing email' => [['email' => ''], ['email' => 'required']],
+    'email too long' => [['email' => str_repeat('e', 244).'@example.test'], ['email' => '255']],
+    'missing currency' => [['currency' => ''], ['currency' => 'required']],
+    'webhook URL too long' => [['webhook_url' => 'https://acme.test/'.str_repeat('h', 2_031), 'webhook_secret' => str_repeat('s', 16)], ['webhook_url' => '2048']],
+    'non-string secret' => [['webhook_url' => 'https://acme.test/hooks', 'webhook_secret' => ['s']], ['webhook_secret' => 'string']],
+    'secret too long' => [['webhook_url' => 'https://acme.test/hooks', 'webhook_secret' => str_repeat('s', 256)], ['webhook_secret' => '255']],
     'bad email' => [['email' => 'not-an-email'], 'email'],
     'unsupported currency' => [['currency' => 'JPY'], 'currency'],
     'lowercase currency' => [['currency' => 'gbp'], 'currency'],
@@ -60,6 +68,39 @@ it('validates new customers', function (array $payload, array|string $errors) {
     'secret without webhook' => [['webhook_secret' => str_repeat('s', 16)], 'webhook_url'],
     'short secret' => [['webhook_url' => 'https://acme.test/hooks', 'webhook_secret' => 'short'], 'webhook_secret'],
 ]);
+
+it('accepts every supported currency and explicit nulls for the webhook', function (string $currency) {
+    actingAsUser();
+
+    $this->postJson('/api/customers', [
+        'name' => str_repeat('n', 255),
+        'email' => 'accounts@acme.test',
+        'currency' => $currency,
+        'webhook_url' => null,
+        'webhook_secret' => null,
+    ])->assertCreated()->assertJsonPath('currency', $currency)->assertJsonPath('webhook_url', null);
+})->with(['GBP', 'EUR', 'USD']);
+
+it('renders every public field and nothing secret', function () {
+    $this->freezeTime();
+    $user = actingAsUser();
+    $customer = Customer::factory()->for($user)->withWebhook('https://acme.test/hooks')->create([
+        'name' => 'Acme Ltd',
+        'email' => 'accounts@acme.test',
+        'currency' => 'USD',
+    ]);
+
+    $this->getJson("/api/customers/{$customer->id}")
+        ->assertOk()
+        ->assertExactJson([
+            'id' => $customer->id,
+            'name' => 'Acme Ltd',
+            'email' => 'accounts@acme.test',
+            'currency' => 'USD',
+            'webhook_url' => 'https://acme.test/hooks',
+            'created_at' => now()->toIso8601String(),
+        ]);
+});
 
 it('lets two users each have a customer with the same email', function () {
     Customer::factory()->create(['email' => 'shared@example.test']);

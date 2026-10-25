@@ -26,7 +26,8 @@ final readonly class CreateInvoice
         return DB::transaction(function () use ($customer, $lines, $taxRate, $dueAt, $notes, $totals): Invoice {
             $invoice = new Invoice([
                 'customer_id' => $customer->id,
-                'status' => InvoiceStatus::Draft,
+                // Explicit, though the model defaults to draft too, so this line has no killable mutant.
+                'status' => InvoiceStatus::Draft, // @pest-mutate-ignore
                 'currency' => $customer->currency,
                 'tax_rate' => $taxRate,
                 'subtotal' => $totals->subtotal->amount,

@@ -41,3 +41,15 @@ it('reminds the customer of the outstanding balance', function () {
 it('delivers by mail only', function (string $class) {
     expect((new $class($this->invoice))->via(new AnonymousNotifiable))->toBe(['mail']);
 })->with([InvoiceSent::class, InvoiceOverdue::class]);
+
+it('waits for the surrounding transaction before sending', function () {
+    expect((new InvoiceSent($this->invoice))->afterCommit)->toBeTrue();
+});
+
+it('still renders when the invoice has no due date', function (string $class) {
+    $this->invoice->due_at = null;
+
+    $mail = (new $class($this->invoice->load('customer')))->toMail(new AnonymousNotifiable);
+
+    expect($mail->introLines)->not->toBeEmpty();
+})->with([InvoiceSent::class, InvoiceOverdue::class]);

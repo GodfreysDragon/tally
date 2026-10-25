@@ -20,7 +20,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property int $amount
  * @property int $position
  */
-#[Fillable(['description', 'quantity', 'unit_price', 'discount_rate', 'amount', 'position'])]
+// Not an executable line, so mutation testing can't see it covered; Model::shouldBeStrict() guards it instead.
+#[Fillable(['description', 'quantity', 'unit_price', 'discount_rate', 'amount', 'position'])] // @pest-mutate-ignore
 final class InvoiceLine extends Model
 {
     /** @use HasFactory<InvoiceLineFactory> */

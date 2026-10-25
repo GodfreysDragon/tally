@@ -27,7 +27,7 @@ final class StoreInvoiceRequest extends FormRequest
             'tax_rate' => ['required', 'integer', 'between:0,10000'],
             'due_at' => ['nullable', 'date', 'after_or_equal:today'],
             'notes' => ['nullable', 'string', 'max:2000'],
-            'lines' => ['required', 'array', 'min:1', 'max:100'],
+            'lines' => ['required', 'array', 'max:100'], // 'required' already rejects an empty array.
             'lines.*.description' => ['required', 'string', 'max:255'],
             'lines.*.quantity' => ['required', 'integer', 'between:1,1000000'],
             'lines.*.unit_price' => ['required', 'integer', 'between:0,100000000'],

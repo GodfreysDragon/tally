@@ -66,3 +66,28 @@ it('belongs to a user and a customer', function () {
         ->and($invoice->lines()->sole()->invoice->is($invoice))->toBeTrue()
         ->and($invoice->payments()->create(['amount' => 1, 'received_at' => now()])->invoice->is($invoice))->toBeTrue();
 });
+
+it('casts raw column values to their domain types', function () {
+    $invoice = (new Invoice)->setRawAttributes([
+        'status' => 'sent',
+        'tax_rate' => '2000',
+        'subtotal' => '10000',
+        'tax_total' => '2000',
+        'total' => '12000',
+        'amount_paid' => '500',
+        'due_at' => '2026-10-31',
+        'sent_at' => '2026-10-01 09:00:00',
+        'paid_at' => '2026-10-02 09:00:00',
+        'voided_at' => '2026-10-03 09:00:00',
+        'last_reminded_at' => '2026-10-04 09:00:00',
+    ]);
+
+    expect($invoice->status)->toBe(InvoiceStatus::Sent)
+        ->and([$invoice->tax_rate, $invoice->subtotal, $invoice->tax_total, $invoice->total, $invoice->amount_paid])
+        ->toBe([2_000, 10_000, 2_000, 12_000, 500])
+        ->and($invoice->due_at?->toDateTimeString())->toBe('2026-10-31 00:00:00')
+        ->and($invoice->sent_at?->toDateTimeString())->toBe('2026-10-01 09:00:00')
+        ->and($invoice->paid_at?->toDateTimeString())->toBe('2026-10-02 09:00:00')
+        ->and($invoice->voided_at?->toDateTimeString())->toBe('2026-10-03 09:00:00')
+        ->and($invoice->last_reminded_at?->toDateTimeString())->toBe('2026-10-04 09:00:00');
+});

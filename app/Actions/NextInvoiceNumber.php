@@ -19,11 +19,13 @@ final class NextInvoiceNumber
     {
         $sequence = DB::table('invoice_sequences')->where(['user_id' => $userId, 'year' => $year]);
 
-        DB::table('invoice_sequences')->insertOrIgnore(['user_id' => $userId, 'year' => $year, 'last_number' => 0]);
+        // The column defaults to 0 as well; being explicit here leaves no killable mutant.
+        DB::table('invoice_sequences')->insertOrIgnore(['user_id' => $userId, 'year' => $year, 'last_number' => 0]); // @pest-mutate-ignore
         $sequence->clone()->increment('last_number');
 
         $number = $sequence->clone()->value('last_number');
 
-        return sprintf('INV-%d-%04d', $year, is_numeric($number) ? (int) $number : 0);
+        // The row was just incremented, so $number is always numeric: the guard and cast exist for PHPStan.
+        return sprintf('INV-%d-%04d', $year, is_numeric($number) ? (int) $number : 0); // @pest-mutate-ignore
     }
 }

@@ -34,17 +34,25 @@ it('rejects tampering', function (string $payload, string $secret) {
     'wrong secret' => [PAYLOAD, 'whsec_someone_else'],
 ]);
 
-it('accepts signatures inside the tolerance window', function (int $skew) {
-    $signer = new WebhookSigner(toleranceSeconds: 300);
+it('accepts signatures inside the default five-minute window', function (int $skew) {
+    $signer = new WebhookSigner;
 
     expect($signer->verify(PAYLOAD, $signer->sign(PAYLOAD, SECRET, SIGNED_AT), SECRET, SIGNED_AT + $skew))->toBeTrue();
 })->with([0, 299, 300, -300]);
 
-it('rejects replays outside the tolerance window', function (int $skew) {
-    $signer = new WebhookSigner(toleranceSeconds: 300);
+it('rejects replays outside the default five-minute window', function (int $skew) {
+    $signer = new WebhookSigner;
 
     expect($signer->verify(PAYLOAD, $signer->sign(PAYLOAD, SECRET, SIGNED_AT), SECRET, SIGNED_AT + $skew))->toBeFalse();
 })->with([301, -301, 86_400]);
+
+it('honours a custom tolerance', function () {
+    $signer = new WebhookSigner(toleranceSeconds: 10);
+    $header = $signer->sign(PAYLOAD, SECRET, SIGNED_AT);
+
+    expect($signer->verify(PAYLOAD, $header, SECRET, SIGNED_AT + 10))->toBeTrue()
+        ->and($signer->verify(PAYLOAD, $header, SECRET, SIGNED_AT + 11))->toBeFalse();
+});
 
 it('rejects malformed headers', function (string $header) {
     expect((new WebhookSigner)->verify(PAYLOAD, $header, SECRET, SIGNED_AT))->toBeFalse();
