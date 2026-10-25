@@ -31,3 +31,8 @@ updates:
     directory: /
     schedule:
       interval: monthly
+    ignore:
+      # Stay on the 8.4 LTS line that CI tests against; innovation releases
+      # would make local dev diverge from CI.
+      - dependency-name: mysql
+        update-types: [version-update:semver-major, version-update:semver-minor]
