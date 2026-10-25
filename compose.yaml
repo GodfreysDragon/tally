@@ -54,7 +54,7 @@ services:
     command: ["vendor/bin/pest", "--parallel"]
 
   mysql:
-    image: mysql:8.4
+    image: mysql:26.10
     environment:
       MYSQL_DATABASE: tally
       MYSQL_USER: tally
