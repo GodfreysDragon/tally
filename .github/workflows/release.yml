@@ -25,6 +25,11 @@ jobs:
       attestations: write
     steps:
       - uses: actions/checkout@v7
+
+      # Registry names must be lowercase; github.repository keeps the owner's capitals.
+      - id: image
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
       - uses: docker/setup-qemu-action@v4
       - uses: docker/setup-buildx-action@v4
 
@@ -37,7 +42,7 @@ jobs:
       - id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ghcr.io/${{ github.repository }}
+          images: ${{ steps.image.outputs.name }}
           tags: |
             type=edge,branch=main
             type=sha,format=short
@@ -58,9 +63,12 @@ jobs:
           provenance: mode=max
           sbom: true
 
+      # GitHub only stores attestations for public repositories (or org repos on a paid plan).
+      # Until this one is public, the image still ships, with its SBOM and provenance in the registry.
       - name: Attest build provenance
+        if: ${{ !github.event.repository.private }}
         uses: actions/attest-build-provenance@v4
         with:
-          subject-name: ghcr.io/${{ github.repository }}
+          subject-name: ${{ steps.image.outputs.name }}
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
