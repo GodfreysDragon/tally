@@ -48,7 +48,6 @@ final class DeliverWebhook implements ShouldQueue
         $body = json_encode($this->payload, JSON_THROW_ON_ERROR);
 
         // wantsWebhooks() guarantees both are strings here; the casts below are for PHPStan.
-
         Http::timeout(config()->integer('tally.webhooks.timeout_seconds'))
             ->withHeaders([
                 WebhookSigner::HEADER => $signer->sign($body, (string) $this->customer->webhook_secret, now()->getTimestamp()), // @pest-mutate-ignore
