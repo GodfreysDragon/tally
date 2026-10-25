@@ -3,10 +3,11 @@ name: Release image
 # Publishes the production image to GitHub Container Registry:
 #   push to main  -> :edge and :sha-<short>
 #   tag v1.2.3    -> :1.2.3, :1.2, :latest
+#
+# Never triggered directly by a push: ci.yml calls this only after every
+# quality gate has passed, so an image can't ship from a red commit.
 on:
-  push:
-    branches: [main]
-    tags: ["v*.*.*"]
+  workflow_call:
 
 concurrency:
   group: release-${{ github.ref }}

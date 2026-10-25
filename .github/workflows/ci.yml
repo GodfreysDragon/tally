@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ["v*.*.*"]
   pull_request:
   workflow_dispatch:
 
@@ -231,3 +232,16 @@ jobs:
       - name: Fail if any required job did not succeed
         if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
         run: exit 1
+
+  # Publish the image, but only from main or a version tag, and only once
+  # every gate above is green.
+  release:
+    name: Release
+    needs: ci-passed
+    if: ${{ github.event_name == 'push' && needs.ci-passed.result == 'success' }}
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    uses: ./.github/workflows/release.yml
