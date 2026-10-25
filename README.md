@@ -1,7 +1,6 @@
 # Tally
 
-[![CI](https://github.com/calmarusin/tally/actions/workflows/ci.yml/badge.svg)](https://github.com/calmarusin/tally/actions/workflows/ci.yml)
-[![Release image](https://github.com/calmarusin/tally/actions/workflows/release.yml/badge.svg)](https://github.com/calmarusin/tally/actions/workflows/release.yml)
+[![CI](https://github.com/GodfreysDragon/tally/actions/workflows/ci.yml/badge.svg)](https://github.com/GodfreysDragon/tally/actions/workflows/ci.yml)
 ![PHP](https://img.shields.io/badge/PHP-8.4%20%7C%208.5-777bb4)
 ![PHPStan](https://img.shields.io/badge/PHPStan-level%20max-brightgreen)
 ![Type coverage](https://img.shields.io/badge/type%20coverage-100%25-brightgreen)
@@ -9,13 +8,16 @@
 
 **A small invoicing API that exists to show how I test and ship software.**
 
-The app is deliberately modest: customers, invoices, payments, signed webhooks, overdue reminders. What this repo shows is the pipeline around it. Every pull request has to pass eight independent quality gates before it can merge, and every merge to `main` produces a signed, multi-arch container image.
+The app is deliberately modest: customers, invoices, payments, signed webhooks, overdue reminders. What this repo shows is the pipeline around it. Every pull request has to pass every gate below before it can merge, and only a fully green commit on `main` produces a signed, multi-arch container image.
 
 ```
-217 tests · 567 assertions · ~8s locally in parallel
+278 tests · 739 assertions · PHP 8.4 + 8.5 · SQLite, MySQL 8.4, Postgres 17
 100% line coverage · 100% type coverage · PHPStan level max
-480 / 480 reachable mutants killed
+377 / 377 mutants detected (100% mutation score)
+every API response checked against the OpenAPI spec
 ```
+
+Every number above comes from CI, not from a laptop. That distinction mattered: see [what the first real CI run caught](#what-the-first-real-ci-run-caught).
 
 ---
 
@@ -30,6 +32,7 @@ The app is deliberately modest: customers, invoices, payments, signed webhooks, 
 | Tests | Pest | PHP 8.4 + 8.5 × SQLite, MySQL 8.4, Postgres 17 | SQLite is fast; the real databases catch what SQLite forgives. |
 | Line coverage | Pest + PCOV | **≥ 95%** | A floor, not a target. See mutation testing. |
 | Mutation testing | Pest `--mutate` | **≥ 90%** score | Coverage says a line *ran*. Mutation testing says a test would *notice* if it were wrong. |
+| API contract | [OpenAPI spec](docs/openapi.yaml) + league/openapi-psr7-validator, Redocly | every response matches | The docs can't drift from the API, because every API response in the suite is checked against them. |
 | Dependencies | `composer audit`, `composer validate --strict` | zero advisories | Known CVEs fail the build. |
 | Container | Docker build, smoke test, Trivy | boots healthy, no fixable criticals | The thing that ships gets tested, not just the code inside it. |
 
@@ -40,14 +43,14 @@ All of them feed one required status check, **`CI passed`**, so branch protectio
 ```mermaid
 flowchart LR
     PR[Pull request] --> lint[Code style]
-    PR --> static[PHPStan max<br/>+ type coverage]
+    PR --> static[PHPStan max<br/>+ type coverage<br/>+ OpenAPI lint]
     PR --> deps[composer audit]
     PR --> tests[Tests matrix<br/>PHP 8.4/8.5 × sqlite<br/>+ MySQL + Postgres]
     PR --> cov[Coverage ≥ 95%]
     PR --> mut[Mutation ≥ 90%]
     PR --> docker[Build image<br/>smoke test<br/>Trivy scan]
     lint & static & deps & tests & cov & mut & docker --> gate{CI passed}
-    gate -->|merge to main| release[Release workflow<br/>amd64 + arm64<br/>SBOM + provenance<br/>→ ghcr.io]
+    gate -->|only on main or a v* tag| release[Release<br/>amd64 + arm64<br/>SBOM + provenance<br/>→ ghcr.io]
 ```
 
 Jobs run in parallel, so the wall-clock time is the slowest job, not the sum. Superseded PR runs are cancelled automatically. Runs on `main` are never cancelled.
@@ -62,6 +65,19 @@ These came up while I was building the repo, not as staged examples.
 - **Untyped request data reaching the domain.** At level max, PHPStan flagged every `$request->validate()[...]` access as `mixed` flowing into typed code. The controllers now read typed input (`$request->string()`, `$request->enum()`).
 - **A list that stopped being a list.** PHPStan noticed that `Money::allocate()` mutates array keys in a loop, so the return value could no longer be proven a `list<Money>`.
 - **Convention drift.** The arch tests failed when a console command was missing its `Command` suffix and when a file was missing `declare(strict_types=1)`.
+- **A spec that was wrong about errors.** The first time every API response was checked against `docs/openapi.yaml`, it failed on overpayment: that 422 carries a `message` but no `errors` map, unlike a validation failure. The spec now documents both shapes.
+
+### What the first real CI run caught
+
+The repo was built and verified on a laptop, and the first push to GitHub went red on three gates. Each one was a gap between "passes for me" and "passes":
+
+- **A stale lock file.** `composer validate --strict` failed because `composer.lock`'s content hash no longer matched `composer.json`.
+- **An action version that doesn't exist.** The Docker job never started: `aquasecurity/trivy-action` tags are `v0.33.1`, not `0.33.1`.
+- **A mutation score that didn't hold up.** Locally every reachable mutant had been killed; on CI the score was **71.8%**, with 107 surviving mutants. They were real gaps: validation rules no test exercised, webhook payload keys and resource fields nothing asserted, and `Money::allocate()` never handed a remainder bigger than one. The tests that close them now assert exact validation messages, so a missing `integer` rule can't hide behind another rule's error. The score on CI is now 100%.
+
+A dozen lines carry `@pest-mutate-ignore`, each with a comment saying why. They fall into two groups. Some are equivalent mutants: twice an integer remainder is always even, so `>= 10_000` and `>= 9_999` can't differ, and some casts exist only for PHPStan. The rest are `#[Fillable]` attributes, constants and property defaults, which are never executable lines, so Pest can't count them as covered. `Model::shouldBeStrict()` guards the fillable lists instead.
+
+The release workflow had a quieter problem: it published `:edge` on every push to `main` *whether or not CI passed*. It now runs only as the last job of CI, after `CI passed`.
 
 ## Testing approach
 
@@ -82,7 +98,9 @@ it('rounds half away from zero', function (int $amount, int $basisPoints, int $e
 
 **The state machine is tested exhaustively.** `InvoiceStatusTest` builds every `from → to` pair from `InvoiceStatus::cases()`. Adding a status without deciding its transitions breaks the test.
 
-**Every test file says what it's testing.** Each file declares `mutates(SomeClass::class)`. This scopes mutation testing (so it's fast enough to run on every PR) and makes the intent of each file obvious.
+**Every test file says what it's testing.** Each file that targets application code declares `mutates(SomeClass::class)`. This scopes mutation testing (so it's fast enough to run on every PR) and makes the intent of each file obvious.
+
+**The API spec is a test, not a document.** `TestCase` passes every `/api` response the suite produces through an OpenAPI validator, so all the feature tests double as contract tests, error cases included. `OpenApiContractTest` checks that every route is in the spec and that nothing in the spec is missing a route, and that a response breaking the contract really does fail.
 
 **Feature tests check behaviour at the boundary.** Authorization is tested for every endpoint from a second user's point of view. Webhook tests verify the signature the way a receiver would, from the raw request body. Time-based logic uses `travelTo()`, never `sleep()`.
 
@@ -103,6 +121,8 @@ it('rounds half away from zero', function (int $amount, int $basisPoints, int $e
 | `POST /api/invoices/{id}/payments` | Partial payments. Overpayment is rejected. Settling the balance marks the invoice paid. |
 | `POST /api/invoices/{id}/void` | Only before any money has been taken. |
 | `php artisan invoices:remind-overdue` | Scheduled daily. At most one reminder per invoice per interval. Supports `--dry-run`. |
+
+The full contract, with request and response schemas and every error shape, is in [`docs/openapi.yaml`](docs/openapi.yaml) (OpenAPI 3.0). It opens in any OpenAPI viewer, such as [editor.swagger.io](https://editor.swagger.io).
 
 Some of the decisions here are the kind that only show up in production:
 
@@ -128,10 +148,24 @@ composer lint          # fix code style
 ### With Docker
 
 ```bash
-docker compose up -d                 # API :8080, queue worker, scheduler, MySQL, Mailpit (:8025)
-docker compose exec app php artisan migrate
-docker compose run --rm test         # the full suite against MySQL, in its own tally_testing database
+docker compose up -d                          # API :8080, queue worker, scheduler, MySQL, Mailpit (:8025)
+docker compose exec app php artisan migrate --seed
+docker compose run --rm test                  # the full suite against MySQL, in its own tally_testing database
 ```
+
+The seeder creates a demo account (`demo@tally.test` / `password`, for local use only) with three customers and one invoice in every state: draft, sent, part-paid, paid, overdue and void. It goes through the same actions as the API, so the totals and invoice numbers are real. To try it:
+
+```bash
+TOKEN=$(curl -s localhost:8080/api/tokens -H 'Content-Type: application/json' \
+  -d '{"email":"demo@tally.test","password":"password","device_name":"curl"}' | jq -r .token)
+
+curl -s localhost:8080/api/invoices?overdue=1 -H "Authorization: Bearer $TOKEN" | jq '.data[] | {number, balance}'
+
+curl -s localhost:8080/api/invoices/2/payments -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{"amount": 1000, "reference": "BACS-42"}'
+```
+
+Sending an invoice emails the customer, and the queue worker delivers it to Mailpit at <http://localhost:8025>, where the seeded invoices' emails are already waiting.
 
 ### The production image
 
@@ -161,7 +195,8 @@ The smoke test checks what can only be checked from outside the container:
 
 ### Releases
 
-`.github/workflows/release.yml` publishes to `ghcr.io/calmarusin/tally`:
+`.github/workflows/release.yml` publishes to `ghcr.io/godfreysdragon/tally`. It never runs on its own trigger: CI calls it as its last job, after `CI passed`, so an image can't ship from a red commit.
+
 - a push to `main` produces `:edge` and `:sha-xxxxxxx`
 - a `v1.2.3` tag produces `:1.2.3`, `:1.2` and `:latest`
 
@@ -177,6 +212,8 @@ app/
   Data/           Readonly DTOs
   Enums/          InvoiceStatus and its transition rules
   Support/        Money, InvoiceCalculator, WebhookSigner: framework-free
+docs/
+  openapi.yaml    The API contract the test suite enforces
 tests/
   Arch/           Architecture rules
   Unit/           Plain PHPUnit, no framework

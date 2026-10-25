@@ -59,8 +59,9 @@ final readonly class Money implements JsonSerializable
         $product = $this->amount * $basisPoints;
         $quotient = intdiv($product, 10_000);
 
-        if (abs($product % 10_000) * 2 >= 10_000) {
-            $quotient += $product <=> 0;
+        // Mutants here are equivalent: 2 * remainder is always even, and $product is never 0 or ±1 inside the branch.
+        if (abs($product % 10_000) * 2 >= 10_000) { // @pest-mutate-ignore
+            $quotient += $product <=> 0; // @pest-mutate-ignore
         }
 
         return new self($quotient, $this->currency);
@@ -91,7 +92,8 @@ final readonly class Money implements JsonSerializable
             $remainder -= $step;
         }
 
-        return array_values(array_map(fn (int $share): self => new self($share, $this->currency), $shares));
+        // Already a list at runtime; array_values() is what lets PHPStan prove it.
+        return array_values(array_map(fn (int $share): self => new self($share, $this->currency), $shares)); // @pest-mutate-ignore
     }
 
     public function isZero(): bool

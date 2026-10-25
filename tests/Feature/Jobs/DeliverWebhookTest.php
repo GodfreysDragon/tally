@@ -87,3 +87,12 @@ it('is dispatched through the real queue end to end', function () {
 
     Http::assertSentCount(1);
 });
+
+it('logs a give-up that has no exception attached', function () {
+    Log::spy();
+    $customer = Customer::factory()->withWebhook()->create();
+
+    (new DeliverWebhook($customer, webhookPayload()))->failed(null);
+
+    Log::shouldHaveReceived('warning')->once()->with('Webhook delivery gave up.', Mockery::subset(['error' => null]));
+});

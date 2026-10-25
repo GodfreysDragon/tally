@@ -79,6 +79,8 @@ describe('allocate', function () {
     })->with([
         'even split' => [100, [1, 1], [50, 50]],
         'remainder to first' => [100, [1, 1, 1], [34, 33, 33]],
+        'remainder spread in order' => [100, [1, 1, 1, 1, 1, 1, 1], [15, 15, 14, 14, 14, 14, 14]],
+        'negative remainder spread' => [-100, [1, 1, 1, 1, 1, 1, 1], [-15, -15, -14, -14, -14, -14, -14]],
         'weighted' => [1_000, [70, 30], [700, 300]],
         'weighted with remainder' => [5, [3, 7], [2, 3]],
         'zero ratio share' => [100, [0, 1], [0, 100]],
@@ -124,6 +126,7 @@ describe('presentation', function () {
         [1_250, 'GBP 12.50'],
         [123_456_789, 'GBP 1,234,567.89'],
         [-1_250, '-GBP 12.50'],
+        [-1, '-GBP 0.01'],
     ]);
 
     it('serialises to JSON', function () {

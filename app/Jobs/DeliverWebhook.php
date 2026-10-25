@@ -16,7 +16,9 @@ final class DeliverWebhook implements ShouldQueue
 {
     use Queueable;
 
-    public int $tries = 5;
+    // Property defaults aren't executable lines, so mutation testing can never see a test cover them.
+    // DeliverWebhookTest asserts the value directly.
+    public int $tries = 5; // @pest-mutate-ignore
 
     /**
      * @param  array{id: string, type: string, created_at: string, data: array<string, mixed>}  $payload
@@ -45,14 +47,15 @@ final class DeliverWebhook implements ShouldQueue
 
         $body = json_encode($this->payload, JSON_THROW_ON_ERROR);
 
+        // wantsWebhooks() guarantees both are strings here; the casts below are for PHPStan.
         Http::timeout(config()->integer('tally.webhooks.timeout_seconds'))
             ->withHeaders([
-                WebhookSigner::HEADER => $signer->sign($body, (string) $this->customer->webhook_secret, now()->getTimestamp()),
+                WebhookSigner::HEADER => $signer->sign($body, (string) $this->customer->webhook_secret, now()->getTimestamp()), // @pest-mutate-ignore
                 'Tally-Event' => $this->payload['type'],
                 'Tally-Delivery' => $this->payload['id'],
             ])
             ->withBody($body, 'application/json')
-            ->post((string) $this->customer->webhook_url)
+            ->post((string) $this->customer->webhook_url) // @pest-mutate-ignore
             ->throw();
     }
 

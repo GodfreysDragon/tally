@@ -1,0 +1,6 @@
+extends:
+  - recommended
+
+rules:
+  # The documented server is the local docker compose stack; there is no hosted one.
+  no-server-example.com: off

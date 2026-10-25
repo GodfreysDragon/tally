@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ["v*.*.*"]
   pull_request:
   workflow_dispatch:
 
@@ -26,12 +27,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ env.PHP_VERSION }}
           coverage: none
-      - uses: ramsey/composer-install@v3
+      - uses: ramsey/composer-install@v4
       - run: vendor/bin/pint --test
 
   static-analysis:
@@ -39,14 +40,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ env.PHP_VERSION }}
           coverage: none
-      - uses: ramsey/composer-install@v3
+      - uses: ramsey/composer-install@v4
       - name: Restore PHPStan result cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .phpstan.cache
           key: phpstan-${{ github.run_id }}
@@ -55,19 +56,21 @@ jobs:
         run: vendor/bin/phpstan analyse --memory-limit=1G --no-progress --error-format=github
       - name: Type coverage (100%)
         run: php -d memory_limit=1G vendor/bin/pest --type-coverage --min=100
+      - name: Lint the OpenAPI spec
+        run: npx --yes @redocly/cli@2.71.0 lint docs/openapi.yaml
 
   dependencies:
     name: Dependency health
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ env.PHP_VERSION }}
           coverage: none
       - run: composer validate --strict
-      - uses: ramsey/composer-install@v3
+      - uses: ramsey/composer-install@v4
       - name: Known vulnerabilities
         run: composer audit --locked
 
@@ -116,18 +119,18 @@ jobs:
       DB_PASSWORD: secret
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ matrix.php }}
           extensions: pdo_sqlite, pdo_mysql, pdo_pgsql
           coverage: none
-      - uses: ramsey/composer-install@v3
+      - uses: ramsey/composer-install@v4
       - name: Pest
         run: vendor/bin/pest --parallel --log-junit=junit.xml
       - name: Upload JUnit report
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: junit-php${{ matrix.php }}-${{ matrix.db }}
           path: junit.xml
@@ -138,12 +141,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ env.PHP_VERSION }}
           coverage: pcov
-      - uses: ramsey/composer-install@v3
+      - uses: ramsey/composer-install@v4
       - name: Pest with coverage (minimum 95%)
         run: vendor/bin/pest --parallel --coverage --min=95 --coverage-clover=coverage.xml --coverage-html=coverage
       - name: Summarise coverage
@@ -159,7 +162,7 @@ jobs:
           ' >> "$GITHUB_STEP_SUMMARY"
       - name: Upload coverage report
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-report
           path: |
@@ -172,12 +175,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ env.PHP_VERSION }}
           coverage: pcov
-      - uses: ramsey/composer-install@v3
+      - uses: ramsey/composer-install@v4
       - name: Pest --mutate
         run: vendor/bin/pest --mutate --parallel --min=90
 
@@ -189,11 +192,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v5
-      - uses: docker/setup-buildx-action@v3
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
 
       - name: Build production image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           target: production
@@ -206,7 +209,7 @@ jobs:
         run: bash docker/smoke-test.sh tally:ci
 
       - name: Scan for fixable critical vulnerabilities
-        uses: aquasecurity/trivy-action@0.33.1
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: tally:ci
           severity: CRITICAL
@@ -214,7 +217,7 @@ jobs:
           exit-code: "1"
 
       - name: Build dev image (used by compose)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           target: dev
@@ -231,3 +234,16 @@ jobs:
       - name: Fail if any required job did not succeed
         if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
         run: exit 1
+
+  # Publish the image, but only from main or a version tag, and only once
+  # every gate above is green.
+  release:
+    name: Release
+    needs: ci-passed
+    if: ${{ github.event_name == 'push' && needs.ci-passed.result == 'success' }}
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    uses: ./.github/workflows/release.yml

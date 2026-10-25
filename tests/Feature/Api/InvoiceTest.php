@@ -41,13 +41,50 @@ describe('create', function () {
             ->assertJsonPath('balance.amount', 392_400)
             ->assertJsonPath('customer.id', $this->customer->id)
             ->assertJsonCount(2, 'lines')
-            ->assertJsonPath('lines.1.amount', 27_000);
+            ->assertJsonPath('lines.1.amount', 27_000)
+            ->assertJsonPath('lines.1.discount_rate', 1_000)
+            ->assertJsonPath('tax_rate', 2_000)
+            ->assertJsonPath('notes', 'Thanks for your business.')
+            ->assertJsonPath('due_at', now()->addDays(14)->toDateString());
 
         $invoice = Invoice::query()->findOrFail($response->json('id'));
 
         expect($invoice->user_id)->toBe($this->user->id)
             ->and($invoice->currency)->toBe('GBP')
             ->and($invoice->lines()->pluck('position')->all())->toBe([0, 1]);
+    });
+
+    it('accepts explicit nulls for optional fields', function () {
+        $payload = invoicePayload([
+            'customer_id' => $this->customer->id,
+            'due_at' => null,
+            'notes' => null,
+            'lines' => [['description' => 'Hosting', 'quantity' => 1, 'unit_price' => 2_500, 'discount_rate' => null]],
+        ]);
+
+        $this->postJson('/api/invoices', $payload)
+            ->assertCreated()
+            ->assertJsonPath('due_at', null)
+            ->assertJsonPath('notes', null)
+            ->assertJsonPath('lines.0.discount_rate', 0);
+    });
+
+    it('stores an empty note as null', function () {
+        $this->postJson('/api/invoices', invoicePayload(['customer_id' => $this->customer->id, 'notes' => '']))
+            ->assertCreated()
+            ->assertJsonPath('notes', null);
+    });
+
+    it('accepts the boundaries of each range', function () {
+        $payload = invoicePayload([
+            'customer_id' => $this->customer->id,
+            'tax_rate' => 10_000,
+            'due_at' => now()->toDateString(),
+            'notes' => str_repeat('n', 2_000),
+            'lines' => array_fill(0, 100, ['description' => str_repeat('d', 255), 'quantity' => 1, 'unit_price' => 0, 'discount_rate' => 10_000]),
+        ]);
+
+        $this->postJson('/api/invoices', $payload)->assertCreated()->assertJsonCount(100, 'lines');
     });
 
     it('takes its currency from the customer', function () {
@@ -69,11 +106,25 @@ describe('create', function () {
         expect(Invoice::query()->count())->toBe(0);
     });
 
-    it('validates the payload', function (array $overrides, string $error) {
+    it('validates the payload', function (array $overrides, array|string $error) {
         $this->postJson('/api/invoices', invoicePayload(['customer_id' => $this->customer->id, ...$overrides]))
             ->assertUnprocessable()
             ->assertJsonValidationErrors($error);
     })->with([
+        'missing customer' => [['customer_id' => null], ['customer_id' => 'required']],
+        'non-integer customer' => [['customer_id' => 'abc'], ['customer_id' => 'integer']],
+        'missing tax rate' => [['tax_rate' => null], ['tax_rate' => 'required']],
+        'non-integer tax rate' => [['tax_rate' => 'twenty'], ['tax_rate' => 'integer']],
+        'unparseable due date' => [['due_at' => 'soon'], ['due_at' => 'valid date']],
+        'non-string notes' => [['notes' => ['x']], ['notes' => 'string']],
+        'notes too long' => [['notes' => str_repeat('n', 2_001)], ['notes' => '2000']],
+        'missing lines' => [['lines' => null], ['lines' => 'required']],
+        'lines not a list' => [['lines' => 'one'], ['lines' => 'array']],
+        'too many lines' => [['lines' => array_fill(0, 101, ['description' => 'x', 'quantity' => 1, 'unit_price' => 1])], ['lines' => '100']],
+        'non-string description' => [['lines' => [['description' => 12, 'quantity' => 1, 'unit_price' => 1]]], ['lines.0.description' => 'string']],
+        'description too long' => [['lines' => [['description' => str_repeat('d', 256), 'quantity' => 1, 'unit_price' => 1]]], ['lines.0.description' => '255']],
+        'missing quantity' => [['lines' => [['description' => 'x', 'unit_price' => 1]]], ['lines.0.quantity' => 'required']],
+        'missing price' => [['lines' => [['description' => 'x', 'quantity' => 1]]], ['lines.0.unit_price' => 'required']],
         'no lines' => [['lines' => []], 'lines'],
         'tax over 100%' => [['tax_rate' => 10_001], 'tax_rate'],
         'negative tax' => [['tax_rate' => -1], 'tax_rate'],
@@ -120,8 +171,18 @@ describe('list', function () {
             ->assertJsonPath('data.0.overdue', true);
     });
 
-    it('rejects an unknown status filter', function () {
-        $this->getJson('/api/invoices?status=lost')->assertUnprocessable()->assertJsonValidationErrors('status');
+    it('rejects invalid filters', function (string $query, string $error) {
+        $this->getJson("/api/invoices?{$query}")->assertUnprocessable()->assertJsonValidationErrors($error);
+    })->with([
+        'unknown status' => ['status=lost', 'status'],
+        'non-boolean overdue' => ['overdue=maybe', 'overdue'],
+    ]);
+
+    it('treats empty filters as no filter', function () {
+        Invoice::factory()->for($this->customer)->create();
+        Invoice::factory()->for($this->customer)->sent()->create();
+
+        $this->getJson('/api/invoices?status=&overdue=')->assertOk()->assertJsonCount(2, 'data');
     });
 
     it('does not run one query per invoice', function () {
@@ -133,6 +194,46 @@ describe('list', function () {
 });
 
 describe('show', function () {
+    it('renders every field of a paid invoice', function () {
+        $this->freezeTime();
+        $invoice = Invoice::factory()->for($this->customer)->paid()->create(['notes' => 'Paid in full']);
+
+        $this->getJson("/api/invoices/{$invoice->id}")
+            ->assertOk()
+            ->assertJson([
+                'id' => $invoice->id,
+                'number' => $invoice->number,
+                'status' => 'paid',
+                'currency' => 'GBP',
+                'tax_rate' => 2_000,
+                'subtotal' => ['amount' => 10_000, 'currency' => 'GBP', 'formatted' => 'GBP 100.00'],
+                'tax' => ['amount' => 2_000, 'currency' => 'GBP'],
+                'total' => ['amount' => 12_000, 'currency' => 'GBP'],
+                'amount_paid' => ['amount' => 12_000, 'currency' => 'GBP'],
+                'balance' => ['amount' => 0, 'currency' => 'GBP'],
+                'overdue' => false,
+                'notes' => 'Paid in full',
+                'due_at' => now()->addDays(30)->toDateString(),
+                'sent_at' => now()->toIso8601String(),
+                'paid_at' => now()->toIso8601String(),
+                'voided_at' => null,
+                'customer' => ['id' => $this->customer->id],
+            ]);
+    });
+
+    it('renders a voided draft with no dates', function () {
+        $this->freezeTime();
+        $invoice = Invoice::factory()->for($this->customer)->void()->create(['due_at' => null]);
+
+        $this->getJson("/api/invoices/{$invoice->id}")
+            ->assertOk()
+            ->assertJsonPath('status', 'void')
+            ->assertJsonPath('due_at', null)
+            ->assertJsonPath('sent_at', null)
+            ->assertJsonPath('paid_at', null)
+            ->assertJsonPath('voided_at', now()->toIso8601String());
+    });
+
     it('shows an invoice with its lines and payments', function () {
         $invoice = Invoice::factory()->for($this->customer)->sent()->create();
         $invoice->payments()->create(['amount' => 1_000, 'received_at' => now()]);

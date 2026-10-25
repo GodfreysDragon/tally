@@ -1,6 +1,6 @@
 {
     "$schema": "https://getcomposer.org/schema.json",
-    "name": "calmarusin/tally",
+    "name": "godfreysdragon/tally",
     "type": "project",
     "description": "An invoicing API that exists to show a production-grade testing and CI pipeline: Pest, mutation testing, PHPStan max, GitHub Actions, Docker.",
     "keywords": [
@@ -24,11 +24,14 @@
         "laravel/pail": "^1.2.5",
         "laravel/pao": "^1.0.6",
         "laravel/pint": "^1.27",
+        "league/openapi-psr7-validator": "^0.24",
         "mockery/mockery": "^1.6",
         "nunomaduro/collision": "^8.6",
+        "nyholm/psr7": "^1.8",
         "pestphp/pest": "^5.3",
         "pestphp/pest-plugin-laravel": "^5.0",
-        "pestphp/pest-plugin-type-coverage": "^5.0"
+        "pestphp/pest-plugin-type-coverage": "^5.0",
+        "symfony/psr-http-message-bridge": "^8.1"
     },
     "autoload": {
         "psr-4": {

@@ -3,10 +3,11 @@ name: Release image
 # Publishes the production image to GitHub Container Registry:
 #   push to main  -> :edge and :sha-<short>
 #   tag v1.2.3    -> :1.2.3, :1.2, :latest
+#
+# Never triggered directly by a push: ci.yml calls this only after every
+# quality gate has passed, so an image can't ship from a red commit.
 on:
-  push:
-    branches: [main]
-    tags: ["v*.*.*"]
+  workflow_call:
 
 concurrency:
   group: release-${{ github.ref }}
@@ -23,18 +24,18 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@v5
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
+      - uses: actions/checkout@v7
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
 
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
@@ -44,7 +45,7 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
 
       - id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           target: production
@@ -58,7 +59,7 @@ jobs:
           sbom: true
 
       - name: Attest build provenance
-        uses: actions/attest-build-provenance@v3
+        uses: actions/attest-build-provenance@v4
         with:
           subject-name: ghcr.io/${{ github.repository }}
           subject-digest: ${{ steps.build.outputs.digest }}

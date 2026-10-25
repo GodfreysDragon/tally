@@ -1,0 +1,498 @@
+openapi: 3.0.3
+info:
+  title: Tally API
+  version: 0.1.0
+  description: |
+    A small invoicing API: customers, invoices, partial payments and signed webhooks.
+
+    All money is in integer **minor units** (pence, cents). Rates are in **basis points**
+    (`2000` = 20%). Every response is checked against this document by the test suite
+    (`tests/Feature/Api/OpenApiContractTest.php` and the `assertMatchesOpenApi()` calls in the API tests).
+  license:
+    name: MIT
+    url: https://github.com/GodfreysDragon/tally/blob/main/LICENSE.md
+
+servers:
+  - url: http://localhost:8080/api
+    description: docker compose
+
+security:
+  - bearer: []
+
+tags:
+  - name: Auth
+    description: Sanctum tokens. Every other endpoint needs one.
+  - name: Customers
+    description: The people you bill. Scoped to the authenticated user.
+  - name: Invoices
+    description: Drafts, sending and voiding. Status moves draft → sent → paid, or to void before any payment.
+  - name: Payments
+    description: Partial and full payments against sent invoices.
+
+paths:
+  /tokens:
+    post:
+      tags: [Auth]
+      summary: Exchange credentials for an API token
+      operationId: createToken
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password, device_name]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string }
+                device_name: { type: string, maxLength: 255 }
+      responses:
+        '201':
+          description: 'Token issued. Send it as `Authorization: Bearer <token>`.'
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [token]
+                properties:
+                  token: { type: string, example: '1|3Fq9...' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /customers:
+    get:
+      tags: [Customers]
+      summary: List your customers, alphabetically
+      operationId: listCustomers
+      parameters:
+        - $ref: '#/components/parameters/Page'
+      responses:
+        '200':
+          description: A page of customers.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Paginated'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/Customer' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+    post:
+      tags: [Customers]
+      summary: Create a customer
+      operationId: createCustomer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email, currency]
+              properties:
+                name: { type: string, maxLength: 255 }
+                email: { type: string, format: email, maxLength: 255, description: Unique per user. }
+                currency: { $ref: '#/components/schemas/Currency' }
+                webhook_url:
+                  type: string
+                  format: uri
+                  maxLength: 2048
+                  nullable: true
+                  description: HTTPS only. Required with `webhook_secret`.
+                webhook_secret:
+                  type: string
+                  minLength: 16
+                  maxLength: 255
+                  nullable: true
+                  description: Encrypted at rest and never returned. Required with `webhook_url`.
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Customer' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /customers/{customer}:
+    parameters:
+      - $ref: '#/components/parameters/CustomerId'
+    get:
+      tags: [Customers]
+      summary: Show a customer
+      operationId: showCustomer
+      responses:
+        '200':
+          description: The customer.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Customer' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /invoices:
+    get:
+      tags: [Invoices]
+      summary: List your invoices, newest first
+      operationId: listInvoices
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - name: status
+          in: query
+          schema:
+            type: string
+            allOf:
+              - $ref: '#/components/schemas/InvoiceStatus'
+            nullable: true
+        - name: overdue
+          in: query
+          description: '`1` for sent invoices past their due date.'
+          schema: { type: string, enum: ['', '0', '1', 'true', 'false'] }
+      responses:
+        '200':
+          description: A page of invoices.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Paginated'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/Invoice' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    post:
+      tags: [Invoices]
+      summary: Create a draft invoice
+      description: Totals are calculated server-side. The currency is the customer's.
+      operationId: createInvoice
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [customer_id, tax_rate, lines]
+              properties:
+                customer_id: { type: integer }
+                tax_rate: { $ref: '#/components/schemas/BasisPoints' }
+                due_at: { type: string, format: date, nullable: true, description: Today or later. Defaults to the payment terms when sent. }
+                notes: { type: string, maxLength: 2000, nullable: true }
+                lines:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  items:
+                    type: object
+                    required: [description, quantity, unit_price]
+                    properties:
+                      description: { type: string, maxLength: 255 }
+                      quantity: { type: integer, minimum: 1, maximum: 1000000 }
+                      unit_price: { type: integer, minimum: 0, maximum: 100000000 }
+                      discount_rate:
+                        type: integer
+                        allOf:
+                          - $ref: '#/components/schemas/BasisPoints'
+                        nullable: true
+      responses:
+        '201':
+          description: Created as a draft.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Invoice' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /invoices/{invoice}:
+    parameters:
+      - $ref: '#/components/parameters/InvoiceId'
+    get:
+      tags: [Invoices]
+      summary: Show an invoice with its lines and payments
+      operationId: showInvoice
+      responses:
+        '200':
+          description: The invoice.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Invoice' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /invoices/{invoice}/send:
+    parameters:
+      - $ref: '#/components/parameters/InvoiceId'
+    post:
+      tags: [Invoices]
+      summary: Send a draft
+      description: Assigns the next gap-free number, emails the customer and fires `invoice.sent`.
+      operationId: sendInvoice
+      responses:
+        '200':
+          description: Sent.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Invoice' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Message' }
+
+  /invoices/{invoice}/void:
+    parameters:
+      - $ref: '#/components/parameters/InvoiceId'
+    post:
+      tags: [Invoices]
+      summary: Void an invoice that has taken no money
+      operationId: voidInvoice
+      responses:
+        '200':
+          description: Voided.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Invoice' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /invoices/{invoice}/payments:
+    parameters:
+      - $ref: '#/components/parameters/InvoiceId'
+    post:
+      tags: [Payments]
+      summary: Record a payment against a sent invoice
+      description: Partial payments are allowed; overpayment is not. Settling the balance marks the invoice paid.
+      operationId: recordPayment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount]
+              properties:
+                amount: { type: integer, minimum: 1 }
+                reference: { type: string, maxLength: 255, nullable: true }
+                received_at: { type: string, format: date-time, nullable: true, description: Not in the future. Defaults to now. }
+      responses:
+        '201':
+          description: Recorded.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Payment' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422':
+          description: Validation failed, or the payment exceeds the outstanding balance (a `message` with no `errors`).
+          content:
+            application/json:
+              schema:
+                anyOf:
+                  - $ref: '#/components/schemas/ValidationError'
+                  - $ref: '#/components/schemas/Message'
+
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      description: A Sanctum token from `POST /tokens`.
+
+  parameters:
+    Page:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 1 }
+    CustomerId:
+      name: customer
+      in: path
+      required: true
+      schema: { type: integer }
+    InvoiceId:
+      name: invoice
+      in: path
+      required: true
+      schema: { type: integer }
+
+  schemas:
+    Currency:
+      type: string
+      enum: [GBP, EUR, USD]
+
+    BasisPoints:
+      type: integer
+      minimum: 0
+      maximum: 10000
+      description: '`10000` = 100%.'
+
+    InvoiceStatus:
+      type: string
+      enum: [draft, sent, paid, void]
+
+    Timestamp:
+      type: string
+      format: date-time
+      example: '2026-10-25T09:00:00+00:00'
+
+    Money:
+      type: object
+      additionalProperties: false
+      required: [amount, currency, formatted]
+      properties:
+        amount: { type: integer, description: Minor units. }
+        currency: { $ref: '#/components/schemas/Currency' }
+        formatted: { type: string, example: 'GBP 3,924.00' }
+
+    Customer:
+      type: object
+      additionalProperties: false
+      required: [id, name, email, currency, webhook_url, created_at]
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        email: { type: string, format: email }
+        currency: { $ref: '#/components/schemas/Currency' }
+        webhook_url: { type: string, format: uri, nullable: true }
+        created_at: { $ref: '#/components/schemas/Timestamp' }
+
+    InvoiceLine:
+      type: object
+      additionalProperties: false
+      required: [description, quantity, unit_price, discount_rate, amount]
+      properties:
+        description: { type: string }
+        quantity: { type: integer }
+        unit_price: { type: integer }
+        discount_rate: { $ref: '#/components/schemas/BasisPoints' }
+        amount: { type: integer, description: After the line discount. }
+
+    Payment:
+      type: object
+      additionalProperties: false
+      required: [id, amount, reference, received_at]
+      properties:
+        id: { type: integer }
+        amount: { type: integer }
+        reference: { type: string, nullable: true }
+        received_at: { $ref: '#/components/schemas/Timestamp' }
+
+    Invoice:
+      type: object
+      additionalProperties: false
+      required: [id, number, status, currency, tax_rate, subtotal, tax, total, amount_paid, balance, overdue, notes, due_at, sent_at, paid_at, voided_at]
+      properties:
+        id: { type: integer }
+        number: { type: string, nullable: true, example: INV-2026-0001, description: Assigned when sent. }
+        status: { $ref: '#/components/schemas/InvoiceStatus' }
+        currency: { $ref: '#/components/schemas/Currency' }
+        tax_rate: { $ref: '#/components/schemas/BasisPoints' }
+        subtotal: { $ref: '#/components/schemas/Money' }
+        tax: { $ref: '#/components/schemas/Money' }
+        total: { $ref: '#/components/schemas/Money' }
+        amount_paid: { $ref: '#/components/schemas/Money' }
+        balance: { $ref: '#/components/schemas/Money' }
+        overdue: { type: boolean }
+        notes: { type: string, nullable: true }
+        due_at: { type: string, format: date, nullable: true }
+        sent_at: { type: string, format: date-time, nullable: true }
+        paid_at: { type: string, format: date-time, nullable: true }
+        voided_at: { type: string, format: date-time, nullable: true }
+        customer: { $ref: '#/components/schemas/Customer' }
+        lines:
+          type: array
+          items: { $ref: '#/components/schemas/InvoiceLine' }
+        payments:
+          type: array
+          description: Included by `GET /invoices/{invoice}`.
+          items: { $ref: '#/components/schemas/Payment' }
+
+    Paginated:
+      type: object
+      required: [data, links, meta]
+      properties:
+        data: { type: array, items: {} }
+        links:
+          type: object
+          required: [first, last, prev, next]
+          properties:
+            first: { type: string, nullable: true }
+            last: { type: string, nullable: true }
+            prev: { type: string, nullable: true }
+            next: { type: string, nullable: true }
+        meta:
+          type: object
+          required: [current_page, per_page, total]
+          properties:
+            current_page: { type: integer }
+            from: { type: integer, nullable: true }
+            last_page: { type: integer }
+            path: { type: string }
+            per_page: { type: integer }
+            to: { type: integer, nullable: true }
+            total: { type: integer }
+
+    Message:
+      type: object
+      required: [message]
+      properties:
+        message: { type: string }
+
+    ValidationError:
+      type: object
+      required: [message, errors]
+      properties:
+        message: { type: string }
+        errors:
+          type: object
+          additionalProperties:
+            type: array
+            items: { type: string }
+
+  responses:
+    Unauthenticated:
+      description: Missing or invalid token.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Message' }
+    Forbidden:
+      description: The record belongs to another user.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Message' }
+    NotFound:
+      description: No such record.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Message' }
+    Conflict:
+      description: The invoice's status doesn't allow this.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Message' }
+    Message:
+      description: The request can't be applied, for example sending an invoice with no lines.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Message' }
+    ValidationError:
+      description: The request failed validation.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ValidationError' }
+    TooManyRequests:
+      description: Throttled.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Message' }

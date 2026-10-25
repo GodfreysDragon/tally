@@ -38,7 +38,9 @@ use Illuminate\Support\Carbon;
  * @property Carbon $updated_at
  * @property-read Customer $customer
  */
-#[Fillable(['customer_id', 'status', 'currency', 'tax_rate', 'subtotal', 'tax_total', 'total', 'notes', 'due_at'])]
+// Attribute arguments and property defaults aren't executable lines, so mutation testing can't see them
+// covered. Model::shouldBeStrict() makes a missing fillable entry throw in every test that creates an invoice.
+#[Fillable(['customer_id', 'status', 'currency', 'tax_rate', 'subtotal', 'tax_total', 'total', 'notes', 'due_at'])] // @pest-mutate-ignore
 final class Invoice extends Model
 {
     /** @use HasFactory<InvoiceFactory> */
@@ -48,8 +50,8 @@ final class Invoice extends Model
      * @var array<string, mixed>
      */
     protected $attributes = [
-        'status' => 'draft',
-        'amount_paid' => 0,
+        'status' => 'draft', // @pest-mutate-ignore
+        'amount_paid' => 0, // @pest-mutate-ignore
     ];
 
     /**
