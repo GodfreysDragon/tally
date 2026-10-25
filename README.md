@@ -200,7 +200,7 @@ The smoke test checks what can only be checked from outside the container:
 - a push to `main` produces `:edge` and `:sha-xxxxxxx`
 - a `v1.2.3` tag produces `:1.2.3`, `:1.2` and `:latest`
 
-Images are built for amd64 and arm64, with an SBOM, max-mode provenance and a GitHub build attestation.
+Images are built for amd64 and arm64, with an SBOM and max-mode provenance in the registry. A GitHub build attestation is added too, but only while the repository is public: GitHub doesn't store attestations for private user repositories, so the step skips itself rather than failing the release.
 
 Dependabot keeps Composer packages, Actions, base images and compose images current, with routine bumps grouped into one PR.
 
