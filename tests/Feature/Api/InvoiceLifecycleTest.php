@@ -196,7 +196,8 @@ describe('void', function () {
             ->assertJsonPath('status', 'void');
 
         expect($invoice->fresh()?->voided_at)->not->toBeNull();
-        Queue::assertPushed(DeliverWebhook::class, fn (DeliverWebhook $job) => $job->payload['type'] === 'invoice.voided');
+        Queue::assertPushed(DeliverWebhook::class, fn (DeliverWebhook $job) => $job->payload['type'] === 'invoice.voided'
+            && $job->payload['data']['invoice']['balance'] === 0);
     })->with(['draft', 'sent']);
 
     it('refuses to void a paid or already void invoice', function (string $state) {

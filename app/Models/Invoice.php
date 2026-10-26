@@ -91,8 +91,15 @@ final class Invoice extends Model
         return Money::of($this->total, $this->currency);
     }
 
+    /**
+     * What is still owed. A voided invoice owes nothing, whatever its total.
+     */
     public function balance(): Money
     {
+        if ($this->status === InvoiceStatus::Void) {
+            return Money::zero($this->currency);
+        }
+
         return Money::of($this->total - $this->amount_paid, $this->currency);
     }
 

@@ -14,6 +14,13 @@ it('works out the balance', function () {
         ->and($invoice->totalMoney())->toBeMoney(12_000, 'EUR');
 });
 
+it('owes nothing once voided', function () {
+    $invoice = Invoice::factory()->make(['status' => InvoiceStatus::Void, 'total' => 12_000, 'amount_paid' => 0, 'currency' => 'EUR']);
+
+    expect($invoice->balance())->toBeMoney(0, 'EUR')
+        ->and($invoice->totalMoney())->toBeMoney(12_000, 'EUR');
+});
+
 it('knows when it is overdue', function (InvoiceStatus $status, ?string $dueAt, bool $overdue) {
     $this->travelTo('2026-10-05 15:00:00');
 

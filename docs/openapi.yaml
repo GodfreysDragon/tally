@@ -402,7 +402,10 @@ components:
         tax: { $ref: '#/components/schemas/Money' }
         total: { $ref: '#/components/schemas/Money' }
         amount_paid: { $ref: '#/components/schemas/Money' }
-        balance: { $ref: '#/components/schemas/Money' }
+        balance:
+          description: What is still owed. Zero once paid or voided.
+          allOf:
+            - $ref: '#/components/schemas/Money'
         overdue: { type: boolean }
         notes: { type: string, nullable: true }
         due_at: { type: string, format: date, nullable: true }
