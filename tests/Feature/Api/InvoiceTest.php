@@ -228,6 +228,8 @@ describe('show', function () {
         $this->getJson("/api/invoices/{$invoice->id}")
             ->assertOk()
             ->assertJsonPath('status', 'void')
+            ->assertJsonPath('total.amount', 12_000)
+            ->assertJsonPath('balance.amount', 0)
             ->assertJsonPath('due_at', null)
             ->assertJsonPath('sent_at', null)
             ->assertJsonPath('paid_at', null)
