@@ -13,6 +13,8 @@ use App\Models\Customer;
 use App\Models\User;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Notification;
+use RuntimeException;
 
 /**
  * A demo account with one invoice in every state, for trying the API locally.
@@ -35,6 +37,20 @@ final class DatabaseSeeder extends Seeder
 
     public function run(): void
     {
+        // The demo password is in the README; this account must never exist in production.
+        if (app()->environment('production')) {
+            throw new RuntimeException('The demo seeder must not run in production.');
+        }
+
+        if (User::query()->where('email', self::EMAIL)->exists()) {
+            $this->command?->warn('Demo data already present; run migrate:fresh --seed to start over.');
+
+            return;
+        }
+
+        // The actions email customers; the demo customers are fictional, so nothing is sent.
+        Notification::fake();
+
         $user = User::query()->create([
             'name' => 'Demo User',
             'email' => self::EMAIL,
@@ -59,7 +75,7 @@ final class DatabaseSeeder extends Seeder
 
         // Sent, then part-paid.
         $partPaid = $this->send->handle($this->create->handle($globex, $sprint, 1_900));
-        $this->pay->handle($partPaid, 100_000, 'SEPA-0001', now()->subDays(2));
+        $this->pay->handle($partPaid, 100_000, 'SEPA-0001');
 
         // Paid in full.
         $paid = $this->send->handle($this->create->handle($initech, $retainer, 0));
