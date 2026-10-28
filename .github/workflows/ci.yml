@@ -18,13 +18,15 @@ permissions:
 env:
   PHP_VERSION: "8.4"
 
+# Jobs pin ubuntu-24.04 rather than ubuntu-latest, so a runner OS upgrade is a
+# deliberate one-line PR that CI tests, not something that changes under a release.
 jobs:
   # -------------------------------------------------------------------------
   # Fast feedback: these fail in under a minute and need no database.
   # -------------------------------------------------------------------------
   lint:
     name: Code style
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
@@ -37,7 +39,7 @@ jobs:
 
   static-analysis:
     name: Static analysis
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
@@ -61,7 +63,7 @@ jobs:
 
   dependencies:
     name: Dependency health
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
@@ -79,7 +81,7 @@ jobs:
   # -------------------------------------------------------------------------
   tests:
     name: Tests (PHP ${{ matrix.php }}, ${{ matrix.db }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     strategy:
       fail-fast: false
@@ -138,7 +140,7 @@ jobs:
 
   coverage:
     name: Coverage
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
@@ -172,7 +174,7 @@ jobs:
 
   mutation:
     name: Mutation testing
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
@@ -189,7 +191,7 @@ jobs:
   # -------------------------------------------------------------------------
   docker:
     name: Docker image
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
@@ -229,7 +231,7 @@ jobs:
     name: CI passed
     if: ${{ always() }}
     needs: [lint, static-analysis, dependencies, tests, coverage, mutation, docker]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Fail if any required job did not succeed
         if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
