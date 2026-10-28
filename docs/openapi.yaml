@@ -6,8 +6,10 @@ info:
     A small invoicing API: customers, invoices, partial payments and signed webhooks.
 
     All money is in integer **minor units** (pence, cents). Rates are in **basis points**
-    (`2000` = 20%). Every response is checked against this document by the test suite
-    (`tests/Feature/Api/OpenApiContractTest.php` and the `assertMatchesOpenApi()` calls in the API tests).
+    (`2000` = 20%). Every API response the test suite produces is checked against this document
+    (`tests/TestCase.php`), and `tests/Feature/Api/OpenApiContractTest.php` keeps routes and spec in step.
+
+    Authenticated endpoints are rate-limited per user; over the limit they return `429`.
   license:
     name: MIT
     url: https://github.com/GodfreysDragon/tally/blob/main/LICENSE.md
@@ -82,6 +84,7 @@ paths:
                         type: array
                         items: { $ref: '#/components/schemas/Customer' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
     post:
       tags: [Customers]
       summary: Create a customer
@@ -116,6 +119,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Customer' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
         '422': { $ref: '#/components/responses/ValidationError' }
 
   /customers/{customer}:
@@ -132,6 +136,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Customer' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
@@ -144,11 +149,8 @@ paths:
         - $ref: '#/components/parameters/Page'
         - name: status
           in: query
-          schema:
-            type: string
-            allOf:
-              - $ref: '#/components/schemas/InvoiceStatus'
-            nullable: true
+          description: Empty means no filter.
+          schema: { type: string, enum: ['', draft, sent, paid, void] }
         - name: overdue
           in: query
           description: '`1` for sent invoices past their due date.'
@@ -167,6 +169,7 @@ paths:
                         type: array
                         items: { $ref: '#/components/schemas/Invoice' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
         '422': { $ref: '#/components/responses/ValidationError' }
     post:
       tags: [Invoices]
@@ -196,11 +199,7 @@ paths:
                       description: { type: string, maxLength: 255 }
                       quantity: { type: integer, minimum: 1, maximum: 1000000 }
                       unit_price: { type: integer, minimum: 0, maximum: 100000000 }
-                      discount_rate:
-                        type: integer
-                        allOf:
-                          - $ref: '#/components/schemas/BasisPoints'
-                        nullable: true
+                      discount_rate: { type: integer, minimum: 0, maximum: 10000, nullable: true, description: Basis points. Defaults to 0. }
       responses:
         '201':
           description: Created as a draft.
@@ -208,6 +207,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Invoice' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
         '422': { $ref: '#/components/responses/ValidationError' }
 
   /invoices/{invoice}:
@@ -224,6 +224,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Invoice' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
@@ -242,6 +243,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Invoice' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
@@ -261,6 +263,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Invoice' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
@@ -291,6 +294,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Payment' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
